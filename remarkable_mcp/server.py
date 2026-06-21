@@ -6,7 +6,7 @@ import logging
 import os
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
-from urllib.parse import quote, unquote
+from urllib.parse import parse_qs, quote, unquote
 
 from mcp.server.fastmcp import FastMCP
 
@@ -322,7 +322,12 @@ def run():
 
 
 class _BearerAuthMiddleware:
-    """Minimal ASGI middleware requiring `Authorization: Bearer <token>`.
+    """Minimal ASGI middleware requiring the shared secret.
+
+    Accepts either an `Authorization: Bearer <token>` header or a
+    `?token=<token>` query parameter. The query param exists because some MCP
+    clients (e.g. Cowork's custom connector field) only accept a plain URL
+    with no way to attach custom headers.
 
     The streamable-http server is meant to be reachable over the public
     internet (e.g. a Railway URL), and it grants full read/write access to
@@ -342,7 +347,9 @@ class _BearerAuthMiddleware:
 
         headers = dict(scope.get("headers") or [])
         auth = headers.get(b"authorization", b"").decode("latin-1")
-        if auth != f"Bearer {self.token}":
+        query_token = parse_qs(scope.get("query_string", b"").decode("latin-1")).get("token", [None])[0]
+
+        if auth != f"Bearer {self.token}" and query_token != self.token:
             response = _json_response(401, {"error": "Unauthorized"})
             await response(scope, receive, send)
             return
