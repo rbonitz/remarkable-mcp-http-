@@ -278,8 +278,17 @@ async def lifespan(app: FastMCP) -> AsyncIterator[None]:
         await stop_background_loader(task)
 
 
-# Initialize FastMCP server with lifespan and instructions
-mcp = RemarkableMCP("remarkable", instructions=_build_instructions(), lifespan=lifespan)
+# Initialize FastMCP server with lifespan and instructions.
+# host/port are only used by the streamable-http transport (run_http below),
+# but FastMCP reads them from settings at construction time, so we set them
+# here from the environment Railway (or a local override) provides.
+mcp = RemarkableMCP(
+    "remarkable",
+    instructions=_build_instructions(),
+    lifespan=lifespan,
+    host=os.environ.get("REMARKABLE_HTTP_HOST", "0.0.0.0"),
+    port=int(os.environ.get("PORT", os.environ.get("REMARKABLE_HTTP_PORT", "8000"))),
+)
 
 # Import tools, resources, and prompts to register them
 from remarkable_mcp import (  # noqa: E402
@@ -308,5 +317,62 @@ _app_canvas.register_app_tools()
 
 
 def run():
-    """Run the MCP server."""
+    """Run the MCP server over stdio (local/desktop MCP clients)."""
     mcp.run()
+
+
+class _BearerAuthMiddleware:
+    """Minimal ASGI middleware requiring `Authorization: Bearer <token>`.
+
+    The streamable-http server is meant to be reachable over the public
+    internet (e.g. a Railway URL), and it grants full read/write access to
+    a real reMarkable account, so it must not be left open. If
+    REMARKABLE_MCP_AUTH_TOKEN is unset we refuse to start in HTTP mode
+    rather than silently serving without auth.
+    """
+
+    def __init__(self, app, token: str):
+        self.app = app
+        self.token = token
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        headers = dict(scope.get("headers") or [])
+        auth = headers.get(b"authorization", b"").decode("latin-1")
+        if auth != f"Bearer {self.token}":
+            response = _json_response(401, {"error": "Unauthorized"})
+            await response(scope, receive, send)
+            return
+
+        await self.app(scope, receive, send)
+
+
+def _json_response(status_code: int, body: dict):
+    from starlette.responses import JSONResponse
+
+    return JSONResponse(body, status_code=status_code)
+
+
+def run_http():
+    """Run the MCP server over streamable-http (for Railway/remote MCP clients)."""
+    import uvicorn
+
+    token = os.environ.get("REMARKABLE_MCP_AUTH_TOKEN")
+    if not token:
+        raise SystemExit(
+            "REMARKABLE_MCP_AUTH_TOKEN is not set. Refusing to start an HTTP "
+            "server without auth, since it exposes full access to your "
+            "reMarkable account. Set REMARKABLE_MCP_AUTH_TOKEN to a long "
+            "random secret and pass it as a Bearer token from your MCP client."
+        )
+
+    app = mcp.streamable_http_app()
+    app = _BearerAuthMiddleware(app, token)
+
+    host = mcp.settings.host
+    port = mcp.settings.port
+    logger.info(f"Starting streamable-http server on {host}:{port}{mcp.settings.streamable_http_path}")
+    uvicorn.run(app, host=host, port=port, log_level="info")

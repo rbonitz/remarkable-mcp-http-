@@ -92,6 +92,16 @@ Security Note:
         action="store_true",
         help="Use USB web interface (connect via USB cable, enable in Storage Settings)",
     )
+    parser.add_argument(
+        "--http",
+        action="store_true",
+        help=(
+            "Serve over streamable-http instead of stdio, for remote MCP "
+            "clients (e.g. Cowork's custom connector). Binds to $PORT (set "
+            "by Railway) or REMARKABLE_HTTP_PORT, defaulting to 8000. "
+            "Requires REMARKABLE_MCP_AUTH_TOKEN to be set."
+        ),
+    )
     write_group = parser.add_mutually_exclusive_group()
     write_group.add_argument(
         "--write",
@@ -160,9 +170,9 @@ Security Note:
             os.environ["REMARKABLE_READ_ONLY"] = "1"
         if args.no_cloud_fallback:
             os.environ["REMARKABLE_DISABLE_CLOUD_FALLBACK"] = "1"
-        from remarkable_mcp.server import run
+        from remarkable_mcp.server import run, run_http
 
-        run()
+        run_http() if args.http else run()
     elif args.ssh:
         # SSH mode - set environment variable and run server
         os.environ["REMARKABLE_USE_SSH"] = "1"
@@ -172,16 +182,16 @@ Security Note:
             os.environ["REMARKABLE_READ_ONLY"] = "1"
         if args.no_cloud_fallback:
             os.environ["REMARKABLE_DISABLE_CLOUD_FALLBACK"] = "1"
-        from remarkable_mcp.server import run
+        from remarkable_mcp.server import run, run_http
 
-        run()
+        run_http() if args.http else run()
     else:
         # Cloud mode (default) - write-capable via the sync protocol
         if args.read_only:
             os.environ["REMARKABLE_READ_ONLY"] = "1"
-        from remarkable_mcp.server import run
+        from remarkable_mcp.server import run, run_http
 
-        run()
+        run_http() if args.http else run()
 
 
 if __name__ == "__main__":
