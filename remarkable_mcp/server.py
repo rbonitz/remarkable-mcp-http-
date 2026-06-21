@@ -6,7 +6,7 @@ import logging
 import os
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
-from urllib.parse import parse_qs, quote, unquote
+from urllib.parse import quote, unquote
 
 from mcp.server.fastmcp import FastMCP
 
@@ -321,63 +321,15 @@ def run():
     mcp.run()
 
 
-class _BearerAuthMiddleware:
-    """Minimal ASGI middleware requiring the shared secret.
-
-    Accepts either an `Authorization: Bearer <token>` header or a
-    `?token=<token>` query parameter. The query param exists because some MCP
-    clients (e.g. Cowork's custom connector field) only accept a plain URL
-    with no way to attach custom headers.
-
-    The streamable-http server is meant to be reachable over the public
-    internet (e.g. a Railway URL), and it grants full read/write access to
-    a real reMarkable account, so it must not be left open. If
-    REMARKABLE_MCP_AUTH_TOKEN is unset we refuse to start in HTTP mode
-    rather than silently serving without auth.
-    """
-
-    def __init__(self, app, token: str):
-        self.app = app
-        self.token = token
-
-    async def __call__(self, scope, receive, send):
-        if scope["type"] != "http":
-            await self.app(scope, receive, send)
-            return
-
-        headers = dict(scope.get("headers") or [])
-        auth = headers.get(b"authorization", b"").decode("latin-1")
-        query_token = parse_qs(scope.get("query_string", b"").decode("latin-1")).get("token", [None])[0]
-
-        if auth != f"Bearer {self.token}" and query_token != self.token:
-            response = _json_response(401, {"error": "Unauthorized"})
-            await response(scope, receive, send)
-            return
-
-        await self.app(scope, receive, send)
-
-
-def _json_response(status_code: int, body: dict):
-    from starlette.responses import JSONResponse
-
-    return JSONResponse(body, status_code=status_code)
-
-
 def run_http():
-    """Run the MCP server over streamable-http (for Railway/remote MCP clients)."""
+    """Run the MCP server over streamable-http (for Railway/remote MCP clients).
+
+    No authentication: anyone who knows the URL has full read/write access
+    to the connected reMarkable account.
+    """
     import uvicorn
 
-    token = os.environ.get("REMARKABLE_MCP_AUTH_TOKEN")
-    if not token:
-        raise SystemExit(
-            "REMARKABLE_MCP_AUTH_TOKEN is not set. Refusing to start an HTTP "
-            "server without auth, since it exposes full access to your "
-            "reMarkable account. Set REMARKABLE_MCP_AUTH_TOKEN to a long "
-            "random secret and pass it as a Bearer token from your MCP client."
-        )
-
     app = mcp.streamable_http_app()
-    app = _BearerAuthMiddleware(app, token)
 
     host = mcp.settings.host
     port = mcp.settings.port
