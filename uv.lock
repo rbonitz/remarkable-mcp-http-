@@ -1363,6 +1363,7 @@ dependencies = [
     { name = "pytesseract" },
     { name = "requests" },
     { name = "rmscene" },
+    { name = "uvicorn" },
 ]
 
 [package.optional-dependencies]
@@ -1398,6 +1399,7 @@ requires-dist = [
     { name = "requests", specifier = ">=2.28.0" },
     { name = "rmscene", specifier = ">=0.8.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1.0" },
+    { name = "uvicorn", specifier = ">=0.30.0" },
 ]
 provides-extras = ["dev", "ocr"]
 
